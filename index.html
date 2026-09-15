@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Triveni Nagar — KSEB Patrol — Old Jeep + No Party Office</title>
+<title>Triveni Nagar — KSEB Patrol — Kammis Groups</title>
 <style>
 :root{
   --yellow:#ffd23f;
@@ -126,17 +126,36 @@ button:active{ transform:translateY(1px) scale(.98); }
   #screen{ width:88vw; }
   #settingsPanel{ width:92vw; left:4vw; right:4vw; top:auto; bottom:10px; max-height:70vh; overflow:auto; }
 }
+
+#ksebCall{
+  position:absolute; left:50%; top:56px; transform:translate(-50%,-180%);
+  background:rgba(20,90,200,.92); border:1px solid #4fc3f7; color:#fff;
+  padding:8px 16px; border-radius:8px; font-size:12px; letter-spacing:.8px;
+  z-index:26; transition:transform .25s ease, opacity .25s ease; opacity:0;
+  white-space:nowrap; box-shadow:0 8px 30px rgba(0,0,0,.6); max-width:92vw;
+  overflow:hidden; text-overflow:ellipsis;
+}
+#ksebCall.show{ transform:translate(-50%,0); opacity:1; animation: ringShake .18s infinite; }
+@keyframes ringShake{
+  0%{ transform:translate(-50%,0) rotate(-1deg); }
+  50%{ transform:translate(-50%,0) rotate(1deg); }
+  100%{ transform:translate(-50%,0) rotate(-1deg); }
+}
+#pedalZone{ flex-direction:row; }
+#pedalZone #btnBrake{ order:1; }
+#pedalZone #btnAccel{ order:2; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="banner"></div>
+<div id="ksebCall"></div>
 <button id="settingsBtn">⚙️</button>
 
 <div id="screen" class="panel">
   <div class="kerala-badge">TRIVENI NAGAR</div>
   <h1>FUSE PATROL</h1>
-  <h2>OLD MAHINDRA • PC + ANDROID</h2>
+  <h2>KAMMIS • OLD MAHINDRA</h2>
   <div id="screenBtns">
     <button id="btnStart">START</button>
     <button id="btnSettings" class="ghost">SETTINGS</button>
@@ -183,8 +202,8 @@ button:active{ transform:translateY(1px) scale(.98); }
     </div>
   </div>
   <div id="pedalZone">
-    <button id="btnAccel">GAS</button>
     <button id="btnBrake">BRAKE</button>
+    <button id="btnAccel">GAS</button>
   </div>
 </div>
 
@@ -207,7 +226,7 @@ const CFG = {
   OFFROAD:0.70, HANDBRAKE:720,
   NIGHT_ALPHA:0.78, HEADLIGHT_RANGE:380, HEADLIGHT_HALF:0.58,
   SHIFT_LEN:300, BLACKOUT_FAIL:5, BLACKOUT_TIME:30, CATCH_SPEED:70, REPAIR_TIME:3.0, REPAIR_RANGE:76,
-  MAX_THIEVES:8, MAX_CONCURRENT_THEFTS:2, THEFT_COOLDOWN:9
+  MAX_THIEVES:10, MAX_CONCURRENT_THEFTS:2, THEFT_COOLDOWN:9
 };
 const CELL=CFG.CELL, GRID_W=CFG.GRID_W, GRID_H=CFG.GRID_H;
 const WORLD_W=GRID_W*CELL, WORLD_H=GRID_H*CELL;
@@ -421,7 +440,7 @@ function updateJeep(dt){
       Sfx.thud();playCaughtSound();Sfx.tone(880,0.18,'triangle',0.14,1320);
       const gid=t.groupId;
       if(gid){for(const ot of thieves){if(!ot.dead&&ot.groupId===gid&&dist(ot.x,ot.y,t.x,t.y)<90){ot.dead=true;Game.caught++;Game.deadThieves.push({x:ot.x,y:ot.y,life:2.2});}}}
-      alertPush('CAUGHT','good');Game.shake=7;addParticles(t.x,t.y,18,'#ffe07a');addShockBurst(t.x,t.y,14);
+      alertPush('KAMMI CAUGHT','good');Game.shake=7;addParticles(t.x,t.y,18,'#ffe07a');addShockBurst(t.x,t.y,14);
     }
   }
 }
@@ -610,7 +629,7 @@ function updateThieves(dt){
   groups.forEach(g=>{g.members=g.members.filter(m=>!m.dead);});
   groups=groups.filter(g=>g.members.length>0);
   Game.graceT=Math.max(0,Game.graceT-dt);
-  const wantGroups=Math.min(3,1+Math.floor(Game.shift/75));
+  const wantGroups=Math.min(4,1+Math.floor(Game.shift/45)); // more kammis groups
   let attempts=0;
   while(groups.length<wantGroups&&thieves.length<CFG.MAX_THIEVES&&attempts<10){
     const ok=spawnThiefGroup();attempts++;if(!ok)break;
@@ -623,10 +642,21 @@ function finishSteal(t){
   else{t.pole=null;t.state=TH.FLEE;t.timer=6;t.progress=0;}
   p.working=false;p.darkSince=Game.t;Game.thefts++;Game.lastTheftTime=Game.t;
   addShockBurst(p.x,p.y,18);addParticles(p.x,p.y,14,'#ffeb3b');
-  alertPush('FUSE STOLEN','shock');if(Settings.soundOn){Sfx.pop();Sfx.shock();}Game.flash=1;Game.shake=9;
+  alertPush('FUSE STOLEN - KAMMI','shock');
+  triggerKSEBCall();
+  if(Settings.soundOn){Sfx.pop();Sfx.shock();}Game.flash=1;Game.shake=9;
 }
 
 const Game={mode:'title',paused:false,t:0,shift:0,caught:0,thefts:0,uptime:0,litIntegral:0,shake:0,flash:0,darkCount:0,blackoutTimer:0,deadThieves:[],graceT:0,activeThefts:0,lastTheftTime:-999};
+let ksebCallTimer=0, ksebCallTimeout=null;
+function triggerKSEBCall(){
+  ksebCallTimer=1.5;
+  const el=document.getElementById('ksebCall');
+  if(el){el.textContent='📞 KSEB CALL: Customer — RINGING...'; el.className='show'; if(Settings.soundOn){ Sfx.tone(800,0.15,'square',0.12); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(600,0.15,'square',0.12);},180); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(800,0.15,'square',0.12);},380); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(600,0.15,'square',0.12);},560); } }
+  clearTimeout(ksebCallTimeout);
+  ksebCallTimeout=setTimeout(()=>{const el2=document.getElementById('ksebCall'); if(el2) el2.className=''; ksebCallTimer=0;},1500);
+}
+
 const cam={x:0,y:0};
 let alertTimer=null,lastAlertAt=-99;
 const el={};
@@ -637,8 +667,8 @@ function startShift(){
   Game.mode='playing';Game.paused=false;Game.t=0;Game.shift=0;Game.caught=0;Game.thefts=0;Game.uptime=100;Game.litIntegral=0;Game.darkCount=0;Game.blackoutTimer=0;Game.graceT=0;Game.activeThefts=0;Game.lastTheftTime=-999;
   thieves=[];groups=[];thiefIdSeq=1;groupIdSeq=1;particles.length=0;marks.length=0;Game.deadThieves=[];shockLines.length=0;shockParticles.length=0;
   for(const p of poles){p.working=true;p.repair=0;p.darkSince=0;}
-  // spawn initial from office
-  spawnThiefGroup();spawnThiefGroup();
+  // spawn initial kammis groups 2-3 each
+  spawnThiefGroup();spawnThiefGroup();spawnThiefGroup();
   resetJeep();
   el.screen.classList.add('hidden');
 }
@@ -762,11 +792,7 @@ function drawMahindraJeep(){
   ctx.fillStyle='#ffd23f';ctx.fillRect(-27,-3,2.2,6);ctx.fillStyle='#000';ctx.font='5px monospace';ctx.textAlign='center';ctx.save();ctx.rotate(-Math.PI/2);ctx.fillText('KL',-0,26.5);ctx.restore();
   ctx.restore();
   if(jeep.repairing){const p=jeep.repairing,k=Math.sin(Game.t*18)*1.5;ctx.fillStyle='#1d3a5a';ctx.beginPath();ctx.arc(p.x-15,p.y+6+k,6.5,0,TAU);ctx.fill();ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(p.x-15,p.y-1.5+k,4.2,0,TAU);ctx.fill();ctx.fillStyle='#2a5a8a';ctx.fillRect(p.x-18,p.y+2+k,6,3);}
-  // KSEB light above jeep — small beacon
-  ctx.save();ctx.translate(jeep.x,jeep.y-18);ctx.rotate(jeep.heading);
-  ctx.fillStyle='rgba(255,210,63,.85)';ctx.beginPath();ctx.arc(0,0,3.5,0,TAU);ctx.fill();
-  ctx.fillStyle='rgba(255,210,63,.25)';ctx.beginPath();ctx.arc(0,0,8,0,TAU);ctx.fill();
-  ctx.restore();
+  // beacon removed as per user request
 }
 function drawParticles(){
   for(const m of marks){ctx.save();ctx.translate(m.x,m.y);ctx.rotate(m.a);ctx.fillStyle='rgba(10,10,12,'+clamp(m.life/6.5,0,0.45)+')';ctx.fillRect(-20,-13,9,3.5);ctx.fillRect(-20,9.5,9,3.5);ctx.restore();}
@@ -952,5 +978,5 @@ function boot(){resize();bindUI();generateWorld(20260915);renderBackground();res
 boot();
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b8b1bf9c680dbf',t:'MTc4OTQ4NjQ1Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b8cf343d16efe6',t:'MTc4OTQ4NzY2MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
