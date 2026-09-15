@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>അണ്ടിമുക്ക് നഗർ — KSEB Patrol</title>
+<title>അണ്ടിമുക്ക് നഗർ — Power Cut</title>
 <style>
 :root{
   --yellow:#ffd23f;
@@ -144,6 +144,8 @@ button:active{ transform:translateY(1px) scale(.98); }
 #pedalZone{ flex-direction:row; }
 #pedalZone #btnBrake{ order:1; }
 #pedalZone #btnAccel{ order:2; }
+
+.toggle-group [data-role]{ font-size:10px; padding:6px 4px; }
 </style>
 </head>
 <body>
@@ -151,17 +153,15 @@ button:active{ transform:translateY(1px) scale(.98); }
 <div id="banner"></div>
 <div id="ksebCall"></div>
 <button id="settingsBtn">⚙️</button>
-
 <div id="screen" class="panel">
   <div class="kerala-badge">അണ്ടിമുക്ക് നഗർ</div>
-  <h1>PINARAYI CUT</h1>
+  <h1>POWER(PINARAYI) CUT</h1>
   <h2>Developed By: Kuttan Solutions</h2>
   <div id="screenBtns">
     <button id="btnStart">START</button>
     <button id="btnSettings" class="ghost">SETTINGS</button>
   </div>
 </div>
-
 <div id="settingsPanel" class="panel hidden">
   <h3>SETTINGS</h3>
   <div class="setting-row">
@@ -169,6 +169,14 @@ button:active{ transform:translateY(1px) scale(.98); }
     <div class="toggle-group">
       <button data-ctrl="wheel" class="on">Steering Wheel</button>
       <button data-ctrl="buttons">Buttons</button>
+    </div>
+  </div>
+  <div class="setting-row">
+    <label>Role</label>
+    <div class="toggle-group">
+      <button data-role="kseb" class="on">KSEB</button>
+      <button data-role="police">Police</button>
+      <button data-role="common">Common</button>
     </div>
   </div>
   <div class="setting-row">
@@ -192,7 +200,6 @@ button:active{ transform:translateY(1px) scale(.98); }
     <button id="btnCloseSettings" style="font-size:10px">CLOSE</button>
   </div>
 </div>
-
 <div id="mobileControls" class="hidden">
   <div id="steerZone">
     <div id="steerWheel"><div id="steerKnob"></div></div>
@@ -206,13 +213,7 @@ button:active{ transform:translateY(1px) scale(.98); }
     <button id="btnAccel">GAS</button>
   </div>
 </div>
-
-<div id="rotateOverlay" class="hidden">
-  <span>↻</span>
-  Rotate phone to <b>landscape</b><br>
-  <small>Horizontal = more view</small>
-</div>
-
+<div id="rotateOverlay" class="hidden"><span>↻</span>Rotate to <b>landscape</b></div>
 <script>
 'use strict';
 /* Triveni Nagar — KSEB Patrol — Single File + Android — No descriptions, Party Office, Smart Theft */
@@ -226,7 +227,8 @@ const CFG = {
   OFFROAD:0.70, HANDBRAKE:720,
   NIGHT_ALPHA:0.78, HEADLIGHT_RANGE:380, HEADLIGHT_HALF:0.58,
   SHIFT_LEN:300, BLACKOUT_FAIL:5, BLACKOUT_TIME:30, CATCH_SPEED:70, REPAIR_TIME:3.0, REPAIR_RANGE:76,
-  MAX_THIEVES:10, MAX_CONCURRENT_THEFTS:2, THEFT_COOLDOWN:9
+  MAX_THIEVES:10, MAX_CONCURRENT_THEFTS:2, THEFT_COOLDOWN:9,
+  AI_POLICE_SPEED:260, AI_KSEB_SPEED:220
 };
 const CELL=CFG.CELL, GRID_W=CFG.GRID_W, GRID_H=CFG.GRID_H;
 const WORLD_W=GRID_W*CELL, WORLD_H=GRID_H*CELL;
@@ -396,53 +398,328 @@ const Sfx={ready:false,ac:null,master:null,eng:null,noiseBuf:null,
 };
 
 const jeep={x:0,y:0,heading:0,speed:0,steerAngle:0,steerVis:0,headlights:true,repairing:null,repairT:0,bumpCd:0,tilt:0};
-function resetJeep(){const b=Hbands[1];jeep.x=60;jeep.y=(b.y+b.h/2)*CELL;jeep.heading=0;jeep.speed=0;jeep.steerAngle=0;jeep.steerVis=0;jeep.headlights=true;jeep.repairing=null;jeep.repairT=0;}
+
+function initAIJeeps(){
+  // place AI police on road
+  const roadCells=[];
+  for(let cy=0;cy<GRID_H;cy++)for(let cx=0;cx<GRID_W;cx++) if(L.road[IX(cx,cy)]) roadCells.push([cx,cy]);
+  function randomRoad(){
+    if(!roadCells.length) return [WORLD_W/2,WORLD_H/2];
+    const [cx,cy]=roadCells[Math.floor(Math.random()*roadCells.length)];
+    return [cx*CELL+CELL/2, cy*CELL+CELL/2];
+  }
+  let p=randomRoad(); aiPolice.x=p[0]; aiPolice.y=p[1]; aiPolice.heading=Math.random()*TAU; aiPolice.speed=0; aiPolice.tx=p[0]; aiPolice.ty=p[1]; aiPolice.timer=0; aiPolice.targetId=null;
+  p=randomRoad(); aiKseb.x=p[0]; aiKseb.y=p[1]; aiKseb.heading=Math.random()*TAU; aiKseb.speed=0; aiKseb.tx=p[0]; aiKseb.ty=p[1]; aiKseb.timer=0; aiKseb.targetPole=null; aiKseb.repairT=0;
+  aiPolice.active = Settings.role!=='police';
+  aiKseb.active = Settings.role!=='kseb';
+  if(Settings.role==='common'){ aiPolice.active=true; aiKseb.active=true; }
+}
+function initVillagers(){
+  villagers=[];
+  for(let i=0;i<10;i++){
+    for(let tries=0;tries<30;tries++){
+      const x=Math.random()*WORLD_W, y=Math.random()*WORLD_H;
+      if(walkableAt(x,y)){ villagers.push({x,y,tx:x,ty:y,dir:Math.random()*TAU,speed:18+Math.random()*18,timer:1+Math.random()*3, type: Math.random()<0.5?'man':'woman'}); break; }
+    }
+  }
+}
+function pickRandomWalkTarget(v){
+  for(let k=0;k<20;k++){
+    const ang=Math.random()*TAU, r=80+Math.random()*200;
+    const x=clamp(v.x+Math.cos(ang)*r,20,WORLD_W-20), y=clamp(v.y+Math.sin(ang)*r,20,WORLD_H-20);
+    if(walkableAt(x,y) && walkLine(v.x,v.y,x,y)){ v.tx=x; v.ty=y; return; }
+  }
+}
+function updateVillagers(dt){
+  for(const v of villagers){
+    v.timer-=dt;
+    const dx=v.tx-v.x, dy=v.ty-v.y, d=Math.hypot(dx,dy);
+    if(d<8 || v.timer<=0){ pickRandomWalkTarget(v); v.timer=2+Math.random()*3; }
+    else{
+      const ux=dx/d, uy=dy/d;
+      v.dir=Math.atan2(uy,ux);
+      const nx=v.x+ux*v.speed*dt, ny=v.y+uy*v.speed*dt;
+      if(walkableAt(nx,v.y)) v.x=nx;
+      if(walkableAt(v.x,ny)) v.y=ny;
+    }
+  }
+}
+function updateAIPolice(dt){
+  if(!aiPolice.active) return;
+  // find nearest thief
+  let nearest=null, best=1e9;
+  for(const t of thieves){
+    if(t.dead) continue;
+    const d=dist(t.x,t.y,aiPolice.x,aiPolice.y);
+    if(d<best){best=d; nearest=t;}
+  }
+  // anti-stuck
+  if(!aiPolice.stuckT) aiPolice.stuckT=0;
+  if(!aiPolice.lastDist) aiPolice.lastDist=1e9;
+  const curDistToTarget = dist(aiPolice.x,aiPolice.y,aiPolice.tx,aiPolice.ty);
+  if(Math.abs(curDistToTarget - aiPolice.lastDist) < 2) aiPolice.stuckT+=dt; else aiPolice.stuckT=0;
+  aiPolice.lastDist = curDistToTarget;
+
+  if(nearest && best<700){
+    aiPolice.targetId=nearest.id;
+    // approach point: nearest walkable near thief, not exact thief if blocked
+    let tx=nearest.x, ty=nearest.y;
+    // if thief not on drivable, find road near
+    if(!drivableAt(tx,ty)){
+      // find nearest drivable around thief
+      let found=false;
+      for(let r=20;r<=80;r+=20){
+        for(let a=0;a<TAU;a+=TAU/8){
+          const cx=tx+Math.cos(a)*r, cy=ty+Math.sin(a)*r;
+          if(drivableAt(cx,cy) && walkLine(aiPolice.x,aiPolice.y,cx,cy)){ tx=cx; ty=cy; found=true; break; }
+        }
+        if(found) break;
+      }
+    }
+    aiPolice.tx=tx; aiPolice.ty=ty;
+    aiPolice.timer=1.5;
+  } else {
+    if(aiPolice.timer<=0 || curDistToTarget<30 || aiPolice.stuckT>1.2){
+      aiPolice.timer=2.5+Math.random()*2;
+      aiPolice.stuckT=0;
+      // wander: pick road cell that is walkable line
+      for(let k=0;k<30;k++){
+        const ang=Math.random()*TAU, r=200+Math.random()*400;
+        const x=clamp(aiPolice.x+Math.cos(ang)*r,40,WORLD_W-40), y=clamp(aiPolice.y+Math.sin(ang)*r,40,WORLD_H-40);
+        if(drivableAt(x,y) && walkLine(aiPolice.x,aiPolice.y,x,y)){ aiPolice.tx=x; aiPolice.ty=y; break; }
+      }
+    }
+  }
+  aiPolice.timer-=dt;
+  const dx=aiPolice.tx-aiPolice.x, dy=aiPolice.ty-aiPolice.y;
+  const targetHeading=Math.atan2(dy,dx);
+  let diff=((targetHeading-aiPolice.heading+Math.PI*3)%TAU)-Math.PI;
+  // smooth turn, no instant flip
+  const turnRate = 1.8;
+  aiPolice.heading+=diff*clamp(turnRate*dt,0,1);
+  const wantSpeed = nearest && best<700 ? CFG.AI_POLICE_SPEED : CFG.AI_POLICE_SPEED*0.55;
+  aiPolice.speed=lerp(aiPolice.speed,wantSpeed,1-Math.exp(-1.8*dt));
+  // try move with collision avoidance, no shiver
+  const nx=aiPolice.x+Math.cos(aiPolice.heading)*aiPolice.speed*dt;
+  const ny=aiPolice.y+Math.sin(aiPolice.heading)*aiPolice.speed*dt;
+  let moved=false;
+  if(canPlaceAI(nx,aiPolice.y,aiPolice.heading)){ aiPolice.x=nx; moved=true; }
+  if(canPlaceAI(aiPolice.x,ny,aiPolice.heading)){ aiPolice.y=ny; moved=true; }
+  if(!moved){
+    // try slight left/right instead of hard flip
+    const tryAng = aiPolice.heading + (Math.random()<0.5?0.6:-0.6);
+    const tx2=aiPolice.x+Math.cos(tryAng)*aiPolice.speed*dt;
+    const ty2=aiPolice.y+Math.sin(tryAng)*aiPolice.speed*dt;
+    if(canPlaceAI(tx2,ty2,tryAng)){ aiPolice.x=tx2; aiPolice.y=ty2; aiPolice.heading=lerp(aiPolice.heading,tryAng,0.2); }
+    else { aiPolice.heading+= (Math.random()-0.5)*0.3; }
+  }
+  // catch
+  for(const t of thieves){
+    if(t.dead) continue;
+    if(dist(t.x,t.y,aiPolice.x,aiPolice.y)<30){
+      t.dead=true; Game.caught++; Game.deadThieves.push({x:t.x,y:t.y,life:2.2});
+      addParticles(t.x,t.y,14,'#ff3b30'); addShockBurst(t.x,t.y,10);
+      if(Settings.soundOn){ Sfx.thud(); }
+    }
+  }
+}
+function canPlaceAI(x,y,heading){
+  // check 3 points instead of 6 for leniency, and allow walkable
+  const c=Math.cos(heading), s=Math.sin(heading);
+  const pts=[[22,0],[-22,10],[-22,-10]];
+  for(const [a,b] of pts){
+    const px=x+c*a-s*b, py=y+s*a+c*b;
+    if(!drivableAt(px,py) && !walkableAt(px,py)) return false;
+  }
+  return true;
+}
+
+function updateAIKseb(dt){
+  if(!aiKseb.active) return;
+  if(!aiKseb.stuckT) aiKseb.stuckT=0;
+  if(!aiKseb.lastDist) aiKseb.lastDist=1e9;
+  const curDist = dist(aiKseb.x,aiKseb.y,aiKseb.tx,aiKseb.ty);
+  if(Math.abs(curDist - aiKseb.lastDist) < 2) aiKseb.stuckT+=dt; else aiKseb.stuckT=0;
+  aiKseb.lastDist=curDist;
+
+  // find nearest dark pole
+  let nearest=null, best=1e9;
+  for(const p of poles){ if(p.working) continue; const d=dist(p.x,p.y,aiKseb.x,aiKseb.y); if(d<best){best=d; nearest=p;} }
+  if(nearest){
+    aiKseb.targetPole=nearest;
+    // physically go there: find approach point on road near pole, not pole exact
+    let approachX=nearest.x, approachY=nearest.y;
+    let found=false;
+    for(let r=30;r<=90;r+=15){
+      for(let a=0;a<TAU;a+=TAU/6){
+        const cx=nearest.x+Math.cos(a)*r, cy=nearest.y+Math.sin(a)*r;
+        if((drivableAt(cx,cy) || walkableAt(cx,cy)) && walkLine(aiKseb.x,aiKseb.y,cx,cy)){ approachX=cx; approachY=cy; found=true; break; }
+      }
+      if(found) break;
+    }
+    // if not found, use nearest road cell to pole
+    if(!found){
+      let bestRoad=1e9, brx=approachX, bry=approachY;
+      for(let cy=0;cy<GRID_H;cy++)for(let cx=0;cx<GRID_W;cx++) if(L.road[IX(cx,cy)]){
+        const rx=cx*CELL+CELL/2, ry=cy*CELL+CELL/2;
+        const d=dist(rx,ry,nearest.x,nearest.y);
+        if(d<bestRoad){bestRoad=d; brx=rx; bry=ry;}
+      }
+      approachX=brx; approachY=bry;
+    }
+    aiKseb.tx=approachX; aiKseb.ty=approachY;
+
+    const distToPole = dist(aiKseb.x,aiKseb.y,nearest.x,nearest.y);
+    if(distToPole<85){
+      // physically arrived, start repairing
+      aiKseb.repairT+=dt;
+      nearest.repair=clamp(aiKseb.repairT/CFG.REPAIR_TIME,0,1);
+      if(aiKseb.repairT>=CFG.REPAIR_TIME){
+        nearest.working=true; nearest.repair=0; nearest.darkSince=0; aiKseb.repairT=0; aiKseb.targetPole=null;
+        if(Settings.soundOn) Sfx.chime();
+        alertPush('KSEB AI RESTORED','good');
+        addParticles(nearest.x,nearest.y,12,'#7CFC00');
+      }
+      aiKseb.speed=lerp(aiKseb.speed,0,1-Math.exp(-3*dt));
+      return;
+    } else {
+      aiKseb.repairT=0;
+      if(nearest) nearest.repair=0;
+    }
+  } else {
+    if(aiKseb.timer<=0 || curDist<30 || aiKseb.stuckT>1.5){
+      aiKseb.timer=2.5+Math.random()*2;
+      aiKseb.stuckT=0;
+      for(let k=0;k<30;k++){
+        const ang=Math.random()*TAU, r=200+Math.random()*400;
+        const x=clamp(aiKseb.x+Math.cos(ang)*r,40,WORLD_W-40), y=clamp(aiKseb.y+Math.sin(ang)*r,40,WORLD_H-40);
+        if((drivableAt(x,y) || walkableAt(x,y)) && walkLine(aiKseb.x,aiKseb.y,x,y)){ aiKseb.tx=x; aiKseb.ty=y; break; }
+      }
+    }
+  }
+  aiKseb.timer-=dt;
+  const dx=aiKseb.tx-aiKseb.x, dy=aiKseb.ty-aiKseb.y;
+  const targetHeading=Math.atan2(dy,dx);
+  let diff=((targetHeading-aiKseb.heading+Math.PI*3)%TAU)-Math.PI;
+  aiKseb.heading+=diff*clamp(1.8*dt,0,1);
+  aiKseb.speed=lerp(aiKseb.speed, CFG.AI_KSEB_SPEED, 1-Math.exp(-1.8*dt));
+  const nx=aiKseb.x+Math.cos(aiKseb.heading)*aiKseb.speed*dt;
+  const ny=aiKseb.y+Math.sin(aiKseb.heading)*aiKseb.speed*dt;
+  let moved=false;
+  if(canPlaceAI(nx,aiKseb.y,aiKseb.heading)){ aiKseb.x=nx; moved=true; }
+  if(canPlaceAI(aiKseb.x,ny,aiKseb.heading)){ aiKseb.y=ny; moved=true; }
+  if(!moved){
+    const tryAng = aiKseb.heading + (Math.random()<0.5?0.6:-0.6);
+    const tx2=aiKseb.x+Math.cos(tryAng)*aiKseb.speed*dt;
+    const ty2=aiKseb.y+Math.sin(tryAng)*aiKseb.speed*dt;
+    if(canPlaceAI(tx2,ty2,tryAng)){ aiKseb.x=tx2; aiKseb.y=ty2; aiKseb.heading=lerp(aiKseb.heading,tryAng,0.2); }
+    else { aiKseb.heading+= (Math.random()-0.5)*0.25; }
+  }
+}
+function resetJeep(){
+const b=Hbands[1];jeep.x=60;jeep.y=(b.y+b.h/2)*CELL;jeep.heading=0;jeep.speed=0;jeep.steerAngle=0;jeep.steerVis=0;jeep.headlights=true;jeep.repairing=null;jeep.repairT=0;}
 function getJeepCorners(x,y,heading){const c=Math.cos(heading),s=Math.sin(heading);const hl=26,hw=13;const pts=[[hl,hw],[hl,-hw],[-hl,hw],[-hl,-hw],[0,0],[hl+2,0]];return pts.map(([a,b])=>[x+c*a-s*b,y+s*a+c*b]);}
 function canPlace(x,y,heading){const h=heading!==undefined?heading:jeep.heading;const corners=getJeepCorners(x,y,h);for(const[px,py]of corners){if(!drivableAt(px,py))return false;}return true;}
 let mobileSteer=0,mobileAccel=0,mobileBrake=0;
 function updateJeep(dt){
-  const keySteer=(keys.left?-1:0)+(keys.right?1:0);
-  const steerIn=Math.abs(mobileSteer)>0.06?mobileSteer:keySteer;
-  const targetSteer=steerIn*CFG.MAX_STEER;
-  jeep.steerAngle=lerp(jeep.steerAngle,targetSteer,1-Math.exp(-6.5*dt));
-  jeep.steerVis=lerp(jeep.steerVis,steerIn,1-Math.exp(-9*dt));
-  const keyAccel=keys.up?1:0, keyBrake=keys.down?1:0;
-  const tx=(mobileAccel>0.05?mobileAccel:keyAccel);
-  const br=(mobileBrake>0.05?mobileBrake:keyBrake);
-  const onRoad=roadAt(jeep.x,jeep.y);
-  if(tx>0.01)jeep.speed+=CFG.ACCEL*tx*dt;
-  if(br>0.01)jeep.speed-=CFG.BRAKE*br*dt;
-  if(keys.space)jeep.speed-=Math.sign(jeep.speed)*CFG.HANDBRAKE*dt;
-  const fr=CFG.FRICTION*dt*(keys.space?0.35:1)*(onRoad?1:1.45);
-  jeep.speed-=Math.sign(jeep.speed)*fr;
-  if(Math.abs(jeep.speed)<4&&tx<0.01&&br<0.01)jeep.speed=0;
-  const maxF=onRoad?CFG.MAX_SPEED:CFG.MAX_SPEED*CFG.OFFROAD;
-  jeep.speed=clamp(jeep.speed,CFG.REVERSE_MAX,maxF);
-  if(Math.abs(jeep.speed)>8){jeep.heading+=(jeep.speed/CFG.WHEELBASE)*Math.tan(jeep.steerAngle)*dt;}
-  else{const pivotFactor=1.0+(8-Math.abs(jeep.speed))/8*0.6;jeep.heading+=steerIn*CFG.LOW_SPEED_TURN*pivotFactor*dt;}
-  if(!onRoad&&Math.abs(jeep.speed)>20)jeep.heading+=Math.sin(Game.t*13+jeep.x*0.01)*0.18*dt*(Math.abs(jeep.speed)/CFG.MAX_SPEED);
-  jeep.tilt=lerp(jeep.tilt,steerIn*clamp(Math.abs(jeep.speed)/120,0,1)*0.18,1-Math.exp(-7*dt));
-  const nx=jeep.x+Math.cos(jeep.heading)*jeep.speed*dt;
-  const ny=jeep.y+Math.sin(jeep.heading)*jeep.speed*dt;
-  let hit=false;
-  if(canPlace(nx,jeep.y))jeep.x=nx;else{hit=true;jeep.speed*=0.4;}
-  if(canPlace(jeep.x,ny))jeep.y=ny;else{hit=true;jeep.speed*=0.4;}
-  if(hit&&Math.abs(jeep.speed)>30&&jeep.bumpCd<=0){jeep.bumpCd=0.35;Game.shake=Math.min(12,Math.abs(jeep.speed)/26);Sfx.thud();addParticles(jeep.x-Math.cos(jeep.heading)*26,jeep.y-Math.sin(jeep.heading)*26,10,'#c9c2a8');}
-  if(hit)jeep.speed*=-0.18;
-  jeep.bumpCd-=dt;
-  if(Math.abs(jeep.speed)>180&&Math.abs(steerIn)>0.2&&Game.t-lastSkid>0.06){lastSkid=Game.t;marks.push({x:jeep.x,y:jeep.y,a:jeep.heading,life:6.5});if(marks.length>160)marks.shift();if(!onRoad&&Math.random()<0.5)addParticles(jeep.x,jeep.y,2,'#5b5340');}
-  Sfx.engine(clamp(Math.abs(jeep.speed)/CFG.MAX_SPEED,0,1.2),tx>0.1,Game.mode==='playing'&&!Game.paused);
+  const isCommon = Settings.role==='common';
+  if(isCommon){
+    // --- Common man realistic walk ---
+    const keySteer=(keys.left?-1:0)+(keys.right?1:0);
+    const steerIn=Math.abs(mobileSteer)>0.06?mobileSteer:keySteer;
+    // turn rate faster for human
+    const turnSpeed = 3.2 + Math.abs(jeep.speed)*0.02;
+    jeep.heading += steerIn * turnSpeed * dt;
+    // normalize heading
+    // movement
+    const keyAccel=keys.up?1:0, keyBrake=keys.down?1:0;
+    const tx=(mobileAccel>0.05?mobileAccel:keyAccel);
+    const br=(mobileBrake>0.05?mobileBrake:keyBrake);
+    // human acceleration
+    const accel = 260;
+    const brake = 380;
+    if(tx>0.01) jeep.speed += accel*tx*dt;
+    if(br>0.01) jeep.speed -= brake*br*dt;
+    // friction - human stops quickly
+    const fr = 180*dt;
+    jeep.speed -= Math.sign(jeep.speed)*fr;
+    if(Math.abs(jeep.speed)<5 && tx<0.01 && br<0.01) jeep.speed=0;
+    jeep.speed = clamp(jeep.speed, -90, 145);
+    // move
+    const nx = jeep.x + Math.cos(jeep.heading)*jeep.speed*dt;
+    const ny = jeep.y + Math.sin(jeep.heading)*jeep.speed*dt;
+    // check walkable for human (not just drivable)
+    let hit=false;
+    if(walkableAt(nx,jeep.y)) jeep.x=nx; else {hit=true; jeep.speed*=0.3;}
+    if(walkableAt(jeep.x,ny)) jeep.y=ny; else {hit=true; jeep.speed*=0.3;}
+    // no skid marks for human, but footstep particles
+    if(Math.abs(jeep.speed)>20 && Game.t-lastSkid>0.18){
+      lastSkid=Game.t;
+      addParticles(jeep.x - Math.cos(jeep.heading)*6, jeep.y - Math.sin(jeep.heading)*6, 1, '#5b5340');
+    }
+    // tilt not used for human, use bob
+    jeep.tilt = Math.sin(Game.t*8)*clamp(Math.abs(jeep.speed)/100,0,0.15);
+    jeep.steerAngle = lerp(jeep.steerAngle, steerIn*0.5, 1-Math.exp(-8*dt));
+    // engine sound off for human, but breathing? keep quiet
+    Sfx.engine(0,false,false);
+  } else {
+    const maxSpeed = CFG.MAX_SPEED;
+    const accel = CFG.ACCEL;
+    const brake = CFG.BRAKE;
+    const keySteer=(keys.left?-1:0)+(keys.right?1:0);
+    const steerIn=Math.abs(mobileSteer)>0.06?mobileSteer:keySteer;
+    const targetSteer=steerIn*CFG.MAX_STEER;
+    jeep.steerAngle=lerp(jeep.steerAngle,targetSteer,1-Math.exp(-6.5*dt));
+    jeep.steerVis=lerp(jeep.steerVis,steerIn,1-Math.exp(-9*dt));
+    const keyAccel=keys.up?1:0, keyBrake=keys.down?1:0;
+    const tx=(mobileAccel>0.05?mobileAccel:keyAccel);
+    const br=(mobileBrake>0.05?mobileBrake:keyBrake);
+    const onRoad=roadAt(jeep.x,jeep.y);
+    if(tx>0.01)jeep.speed+=accel*tx*dt;
+    if(br>0.01)jeep.speed-=brake*br*dt;
+    if(keys.space)jeep.speed-=Math.sign(jeep.speed)*CFG.HANDBRAKE*dt;
+    const fr=CFG.FRICTION*dt*(keys.space?0.35:1)*(onRoad?1:1.45);
+    jeep.speed-=Math.sign(jeep.speed)*fr;
+    if(Math.abs(jeep.speed)<4&&tx<0.01&&br<0.01)jeep.speed=0;
+    const maxF=onRoad?maxSpeed:maxSpeed*CFG.OFFROAD;
+    jeep.speed=clamp(jeep.speed,CFG.REVERSE_MAX,maxF);
+
+    if(Math.abs(jeep.speed)>8){jeep.heading+=(jeep.speed/CFG.WHEELBASE)*Math.tan(jeep.steerAngle)*dt;}
+    else{const pivotFactor=1.0+(8-Math.abs(jeep.speed))/8*0.6;jeep.heading+=steerIn*CFG.LOW_SPEED_TURN*pivotFactor*dt;}
+    if(!onRoad&&Math.abs(jeep.speed)>20)jeep.heading+=Math.sin(Game.t*13+jeep.x*0.01)*0.18*dt*(Math.abs(jeep.speed)/CFG.MAX_SPEED);
+    jeep.tilt=lerp(jeep.tilt,steerIn*clamp(Math.abs(jeep.speed)/120,0,1)*0.18,1-Math.exp(-7*dt));
+    const nx=jeep.x+Math.cos(jeep.heading)*jeep.speed*dt;
+    const ny=jeep.y+Math.sin(jeep.heading)*jeep.speed*dt;
+    let hit=false;
+    if(canPlace(nx,jeep.y))jeep.x=nx;else{hit=true;jeep.speed*=0.4;}
+    if(canPlace(jeep.x,ny))jeep.y=ny;else{hit=true;jeep.speed*=0.4;}
+    if(hit&&Math.abs(jeep.speed)>30&&jeep.bumpCd<=0){jeep.bumpCd=0.35;Game.shake=Math.min(12,Math.abs(jeep.speed)/26);Sfx.thud();addParticles(jeep.x-Math.cos(jeep.heading)*26,jeep.y-Math.sin(jeep.heading)*26,10,'#c9c2a8');}
+    if(hit)jeep.speed*=-0.18;
+    jeep.bumpCd-=dt;
+    if(Math.abs(jeep.speed)>180&&Math.abs(steerIn)>0.2&&Game.t-lastSkid>0.06){lastSkid=Game.t;marks.push({x:jeep.x,y:jeep.y,a:jeep.heading,life:6.5});if(marks.length>160)marks.shift();if(!onRoad&&Math.random()<0.5)addParticles(jeep.x,jeep.y,2,'#5b5340');}
+    Sfx.engine(clamp(Math.abs(jeep.speed)/CFG.MAX_SPEED,0,1.2),tx>0.1,Game.mode==='playing'&&!Game.paused);
+  }
+  // catching logic common for both
   for(const t of thieves){
     if(t.dead)continue;
-    if(dist(t.x,t.y,jeep.x,jeep.y)<26&&Math.abs(jeep.speed)>CFG.CATCH_SPEED){
+    const catchDist = isCommon ? 46 : 28;
+    const needSpeed = isCommon ? 8 : CFG.CATCH_SPEED;
+    const canCatch = isCommon ? (commonAttackT>0 || Math.abs(jeep.speed)>needSpeed) : Math.abs(jeep.speed)>needSpeed;
+    if(dist(t.x,t.y,jeep.x,jeep.y)<catchDist && canCatch){
       t.dead=true;Game.caught++;Game.graceT=18;
       Game.deadThieves.push({x:t.x,y:t.y,life:2.2});
       Sfx.thud();playCaughtSound();Sfx.tone(880,0.18,'triangle',0.14,1320);
       const gid=t.groupId;
       if(gid){for(const ot of thieves){if(!ot.dead&&ot.groupId===gid&&dist(ot.x,ot.y,t.x,t.y)<90){ot.dead=true;Game.caught++;Game.deadThieves.push({x:ot.x,y:ot.y,life:2.2});}}}
-      alertPush('KAMMI CAUGHT','good');Game.shake=7;addParticles(t.x,t.y,18,'#ffe07a');addShockBurst(t.x,t.y,14);
+      alertPush(isCommon ? 'KAMMI HIT WITH STICK!' : 'KAMMI CAUGHT','good');Game.shake=7;addParticles(t.x,t.y,18,'#ffe07a');addShockBurst(t.x,t.y,14);
     }
   }
+  // common man stick attack trigger
+  if(isCommon && (keys.space || mobileAccel>0.5) && commonAttackT<=0){
+    commonAttackT=0.42;
+    if(Settings.soundOn) Sfx.tone(320,0.08,'square',0.12);
+  }
+
 }
 let lastSkid=0;
 const marks=[],particles=[],shockLines=[],shockParticles=[];
@@ -527,6 +804,8 @@ function moveThief(t,dt,speed){
   return false;
 }
 function thiefSpottedByJeep(t){
+  // KSEB and common man do NOT make kammis run, only police does
+  if(Settings.role!=='police') return false;
   const d=dist(t.x,t.y,jeep.x,jeep.y);
   if(d<110)return true;
   if(!jeep.headlights)return false;
@@ -535,6 +814,16 @@ function thiefSpottedByJeep(t){
   let diff=Math.abs(((ang-jeep.heading+Math.PI*3)%TAU)-Math.PI);
   return diff<CFG.HEADLIGHT_HALF+0.08;
 }
+function thiefSpottedByAIPolice(t){
+  if(!aiPolice.active) return false;
+  const d=dist(t.x,t.y,aiPolice.x,aiPolice.y);
+  if(d<130) return true;
+  if(d>CFG.HEADLIGHT_RANGE) return false;
+  const ang=Math.atan2(t.y-aiPolice.y,t.x-aiPolice.x);
+  let diff=Math.abs(((ang-aiPolice.heading+Math.PI*3)%TAU)-Math.PI);
+  return diff<CFG.HEADLIGHT_HALF+0.12;
+}
+
 function updateThieves(dt){
   // count active thefts
   let activeSteals=0;
@@ -544,7 +833,7 @@ function updateThieves(dt){
   for(const g of groups){
     if(g.members.every(m=>m.dead))continue;
     let anySpotted=false;
-    for(const m of g.members){if(!m.dead&&thiefSpottedByJeep(m)){anySpotted=true;
+    for(const m of g.members){if(!m.dead&&(thiefSpottedByJeep(m)||thiefSpottedByAIPolice(m))){anySpotted=true;
       // whoareyou sound only near post
       if(m.pole && dist(m.x,m.y,m.pole.x,m.pole.y)<75 && !m.hasShouted && Game.t-m.lastShout>6){
         m.hasShouted=true; m.lastShout=Game.t; playWhoAreYou();
@@ -649,7 +938,15 @@ function finishSteal(t){
 
 const Game={mode:'title',paused:false,t:0,shift:0,caught:0,thefts:0,uptime:0,litIntegral:0,shake:0,flash:0,darkCount:0,blackoutTimer:0,deadThieves:[],graceT:0,activeThefts:0,lastTheftTime:-999};
 let ksebCallTimer=0, ksebCallTimeout=null;
+let sirenAngle=0;
+let commonAttackT=0;
+let villagers=[];
+const aiPolice={x:0,y:0,heading:0,speed:0,active:false,tx:0,ty:0,timer:0,targetId:null};
+const aiKseb={x:0,y:0,heading:0,speed:0,active:false,tx:0,ty:0,timer:0,targetPole:null,repairT:0};
+
 function triggerKSEBCall(){
+  // only show customer call when player is KSEB, not police or common
+  if(Settings.role!=='kseb') return;
   ksebCallTimer=1.5;
   const el=document.getElementById('ksebCall');
   if(el){el.textContent='📞 KSEB CALL: Customer — RINGING...'; el.className='show'; if(Settings.soundOn){ Sfx.tone(800,0.15,'square',0.12); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(600,0.15,'square',0.12);},180); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(800,0.15,'square',0.12);},380); setTimeout(()=>{if(Settings.soundOn) Sfx.tone(600,0.15,'square',0.12);},560); } }
@@ -670,6 +967,9 @@ function startShift(){
   // spawn initial kammis groups 2-3 each
   spawnThiefGroup();spawnThiefGroup();spawnThiefGroup();
   resetJeep();
+  initAIJeeps();
+  initVillagers();
+
   el.screen.classList.add('hidden');
 }
 function softReset(reason){
@@ -688,9 +988,14 @@ function update(dt){
   Game.t+=dt;Game.shift+=dt;
   Game.shake=Math.max(0,Game.shake-dt*30);
   Game.flash=Math.max(0,Game.flash-dt*2.5);
+  sirenAngle+=dt*8;
+  commonAttackT=Math.max(0,commonAttackT-dt);
+
   if(Game.deadThieves.length)Game.deadThieves.forEach(d=>d.life-=dt);
   Game.deadThieves=Game.deadThieves.filter(d=>d.life>0);
   updateJeep(dt);updateThieves(dt);updateRepair(dt);updateParticles(dt);
+  updateAIPolice(dt);updateAIKseb(dt);updateVillagers(dt);
+
   let lit=0;for(const p of poles)if(p.working)lit++;
   Game.litIntegral+=(lit/poles.length)*dt;
   Game.uptime=(Game.litIntegral/Math.max(0.001,Game.shift))*100;
@@ -701,6 +1006,12 @@ function update(dt){
   updateCamera(dt);
 }
 function updateRepair(dt){
+  // only KSEB can repair, not police or common
+  if(Settings.role!=='kseb'){ 
+    if(jeep.repairing){jeep.repairing.repair=0; jeep.repairing=null; jeep.repairT=0;}
+    for(const p of poles)p.blink+=dt*3;
+    return;
+  }
   let target=null,best=1e9;
   for(const p of poles){if(p.working)continue;const d=dist(p.x,p.y,jeep.x,jeep.y);if(d<CFG.REPAIR_RANGE&&d<best){best=d;target=p;}}
   const stopped=Math.abs(jeep.speed)<20;
@@ -760,41 +1071,275 @@ function drawThiefKerala(t){
   if(isShocked){ctx.strokeStyle='rgba(255,235,59,.85)';ctx.lineWidth=1.2;ctx.beginPath();for(let k=0;k<3;k++){const ang=Math.random()*TAU;ctx.moveTo(t.x,t.y-6);ctx.lineTo(t.x+Math.cos(ang)*(10+Math.random()*10),t.y-6+Math.sin(ang)*(10+Math.random()*10));}ctx.stroke();}
   if(t.state===TH.STEAL){ctx.fillStyle='rgba(0,0,0,.62)';ctx.fillRect(t.x-18,t.y-28,36,5);ctx.fillStyle=t.progress>0.6?'#ff8a3c':'#ffd23f';ctx.fillRect(t.x-18,t.y-28,36*t.progress,5);}
 }
-function drawMahindraJeep(){
-  ctx.save();ctx.translate(jeep.x,jeep.y);ctx.rotate(jeep.heading);ctx.rotate(jeep.tilt*0.25);
-  ctx.fillStyle='rgba(0,0,0,.52)';ctx.beginPath();ctx.ellipse(3,5,31,16,0,0,TAU);ctx.fill();
-  function drawWheel(x,y,steered){
-    ctx.save();ctx.translate(x,y);if(steered)ctx.rotate(jeep.steerAngle*0.85);
-    ctx.fillStyle='#101010';ctx.fillRect(-6.5,-3.5,13,7);
-    ctx.fillStyle='#2a2a2a';ctx.fillRect(-5,-2.5,10,5);
-    ctx.fillStyle='#444';ctx.fillRect(-1.5,-2,3,4);
-    ctx.strokeStyle='#222';ctx.lineWidth=0.8;
-    for(let i=-4;i<=4;i+=2){ctx.beginPath();ctx.moveTo(i,-3);ctx.lineTo(i,3);ctx.stroke();}
+
+
+
+
+
+function drawMahindraJeepAt(x,y,heading, opts){
+  const isPolice = opts && opts.isPolice;
+  const bodyColor = '#e6dcc8'; // exact beige from ref
+  const hoodColor = '#ebe3d1';
+  const topColor = '#0c0e12'; // black soft top exact
+  const bumperColor = '#0a0e14';
+  const steerAng = (opts && opts.steerAngle!==undefined) ? opts.steerAngle : jeep.steerAngle;
+  const tilt = (opts && opts.tilt!==undefined) ? opts.tilt : jeep.tilt;
+  const brakeOn = (opts && opts.brake!==undefined) ? opts.brake : (keys.down||jeep.speed<-12||mobileBrake>0.2);
+  const headOn = (opts && opts.headlights!==undefined) ? opts.headlights : jeep.headlights;
+  ctx.save();ctx.translate(x,y);ctx.rotate(heading);ctx.rotate(tilt*0.08);
+  // shadow exact like ref top view soft shadow
+  ctx.fillStyle='rgba(0,0,0,.38)';ctx.beginPath();ctx.ellipse(0,8,34,18,0,0,TAU);ctx.fill();
+
+  function drawWheel(wx,wy,steered){
+    ctx.save();ctx.translate(wx,wy);if(steered)ctx.rotate(steerAng*0.8);
+    // tyre black like ref
+    ctx.fillStyle='#0a0a0a';ctx.beginPath();ctx.arc(0,0,10,0,TAU);ctx.fill();
+    ctx.fillStyle='#1a1a1a';ctx.beginPath();ctx.arc(0,0,8.5,0,TAU);ctx.fill();
+    // steel rim silver like ref
+    ctx.fillStyle='#8a8a8a';ctx.beginPath();ctx.arc(0,0,5.2,0,TAU);ctx.fill();
+    ctx.fillStyle='#5a5a5a';ctx.beginPath();ctx.arc(0,0,3.8,0,TAU);ctx.fill();
+    ctx.fillStyle='#1a1a1a';ctx.beginPath();ctx.arc(0,0,1.2,0,TAU);ctx.fill();
+    // 5 lug nuts like ref
+    ctx.fillStyle='#2a2a2a';
+    for(let i=0;i<5;i++){const a=i*TAU/5;ctx.beginPath();ctx.arc(Math.cos(a)*2.5,Math.sin(a)*2.5,0.6,0,TAU);ctx.fill();}
     ctx.restore();
   }
-  drawWheel(18,13,true);drawWheel(18,-13,true);drawWheel(-16,13,false);drawWheel(-16,-13,false);
-  ctx.fillStyle='#2a2e33';ctx.fillRect(-28,-14,54,28);
-  ctx.fillStyle='#d8d2bd';ctx.beginPath();ctx.moveTo(-24,-11);ctx.lineTo(20,-11);ctx.lineTo(24,-8);ctx.lineTo(24,8);ctx.lineTo(20,11);ctx.lineTo(-24,11);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#c9c3ad';ctx.fillRect(6,-9,16,18);
-  ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(8,-9);ctx.lineTo(8,9);ctx.moveTo(14,-9);ctx.lineTo(14,9);ctx.stroke();
-  ctx.fillStyle='#3a3d42';ctx.fillRect(23,-7.5,2.5,15);ctx.fillStyle='#d8d2bd';for(let i=-6;i<=6;i+=2.4){ctx.fillRect(22.5,i-0.6,1.8,1.2);}
-  const hlOn=jeep.headlights;ctx.fillStyle=hlOn?'#fff6cf':'#5a5a54';ctx.beginPath();ctx.arc(22.5,-7,3.2,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(22.5,7,3.2,0,TAU);ctx.fill();
-  if(hlOn){ctx.fillStyle='rgba(255,245,180,0.65)';ctx.beginPath();ctx.arc(22.5,-7,5,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(22.5,7,5,0,TAU);ctx.fill();}
-  ctx.strokeStyle='#2a2e33';ctx.lineWidth=1;ctx.beginPath();ctx.arc(22.5,-7,3.2,0,TAU);ctx.stroke();ctx.beginPath();ctx.arc(22.5,7,3.2,0,TAU);ctx.stroke();
-  ctx.fillStyle='#2a2e33';ctx.fillRect(4,-11.5,2,23);ctx.fillStyle='rgba(120,170,200,.55)';ctx.fillRect(4.5,-10,1.2,20);
-  ctx.strokeStyle='#2a2e33';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-4,-11);ctx.lineTo(-4,11);ctx.stroke();ctx.beginPath();ctx.moveTo(-12,-11);ctx.lineTo(-12,11);ctx.stroke();ctx.beginPath();ctx.moveTo(-4,-9);ctx.lineTo(-12,-9);ctx.moveTo(-4,9);ctx.lineTo(-12,9);ctx.stroke();
-  ctx.fillStyle='#5a4a3a';ctx.fillRect(-2,-8,8,6);ctx.fillRect(-2,2,8,6);
-  ctx.strokeStyle='#1e1e1e';ctx.lineWidth=1.6;ctx.beginPath();ctx.arc(3,-5,3,0,TAU);ctx.stroke();ctx.fillStyle='#1e1e1e';ctx.beginPath();ctx.arc(3,-5,0.8,0,TAU);ctx.fill();
-  ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-25,0,7,0,TAU);ctx.fill();ctx.fillStyle='#333';ctx.beginPath();ctx.arc(-25,0,4.5,0,TAU);ctx.fill();ctx.fillStyle='#777';ctx.beginPath();ctx.arc(-25,0,1.8,0,TAU);ctx.fill();
-  ctx.fillStyle='#2a2e33';ctx.fillRect(5,-12.5,2,1.5);ctx.fillRect(5,11,2,1.5);
-  ctx.strokeStyle='rgba(0,0,0,.22)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-14,-11);ctx.lineTo(-14,11);ctx.stroke();
-  if(keys.down||jeep.speed<-12||mobileBrake>0.2){ctx.fillStyle='#ff2a1a';ctx.beginPath();ctx.arc(-26,-7,2.5,0,TAU);ctx.arc(-26,7,2.5,0,TAU);ctx.fill();ctx.fillStyle='rgba(255,50,30,.4)';ctx.beginPath();ctx.arc(-26,-7,5,0,TAU);ctx.arc(-26,7,5,0,TAU);ctx.fill();}
-  ctx.fillStyle='#ffd23f';ctx.fillRect(-27,-3,2.2,6);ctx.fillStyle='#000';ctx.font='5px monospace';ctx.textAlign='center';ctx.save();ctx.rotate(-Math.PI/2);ctx.fillText('KL',-0,26.5);ctx.restore();
+  // wheels positions exact like top view ref - 4 corners
+  drawWheel(20,13.5,true);drawWheel(20,-13.5,true);drawWheel(-18,14.5,false);drawWheel(-18,-14.5,false);
+
+  // body - main rectangular beige like ref top view
+  ctx.fillStyle=bodyColor;
+  ctx.beginPath();
+  // exact shape from ref top view: slightly rounded front, flat rear
+  ctx.moveTo(-26,-11);ctx.lineTo(18,-11);ctx.lineTo(22,-9);ctx.lineTo(24,-5);ctx.lineTo(24,5);ctx.lineTo(22,9);ctx.lineTo(18,11);ctx.lineTo(-26,11);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=0.8;ctx.stroke();
+
+  // fenders - bulged like ref, same color
+  function fender(fx,fy){
+    ctx.fillStyle=bodyColor;ctx.beginPath();ctx.ellipse(fx,fy,11,6.5,0,0,TAU);ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=0.6;ctx.stroke();
+  }
+  fender(19,13.5);fender(19,-13.5);fender(-19,14.5);fender(-19,-14.5);
+
+  // hood - front part like ref top view
+  ctx.fillStyle=hoodColor;ctx.fillRect(4,-10,18,20);
+  // hood text - KSEB blue exact like ref top view (blue with lightning)
+  if(isPolice){
+    ctx.fillStyle='#cc0000';ctx.font='bold 7px sans-serif';ctx.textAlign='center';ctx.fillText('POLICE',12,1);
+  } else {
+    ctx.fillStyle='#0f3a9e';ctx.font='bold 7px sans-serif';ctx.textAlign='center';ctx.fillText('KSEB',12,1);
+    // lightning bolt small
+    ctx.fillStyle='#0f3a9e';ctx.font='bold 6px sans-serif';ctx.fillText('⚡',18,1);
+  }
+
+  // front grille - 7 slots like ref front view, but top view shows as small slits
+  ctx.fillStyle='#0a0e14';ctx.fillRect(24,-6,2.5,12);
+  ctx.fillStyle=bodyColor;
+  for(let i=-5;i<=5;i+=1.7){ctx.fillRect(24.2,i-0.6,2.1,1.2);}
+
+  // headlights - small round like ref top view (front corners)
+  function hl(hx,hy){
+    ctx.fillStyle='#1a1e24';ctx.beginPath();ctx.arc(hx,hy,3.2,0,TAU);ctx.fill();
+    ctx.fillStyle=headOn?'#fff4b0':'#5a5a5a';ctx.beginPath();ctx.arc(hx,hy,2.2,0,TAU);ctx.fill();
+    if(headOn){ctx.fillStyle='rgba(255,240,150,.5)';ctx.beginPath();ctx.arc(hx,hy,4.5,0,TAU);ctx.fill();}
+  }
+  hl(24,-8);hl(24,8);
+
+  // front bumper black like ref
+  ctx.fillStyle=bumperColor;ctx.fillRect(26.5,-11,4,22);
+  // front number plate yellow like ref front view KL 07 C 3287
+  if(isPolice){
+    ctx.fillStyle='#0a0a0a';ctx.fillRect(28.5,-3.5,2.5,7);ctx.fillStyle='#fff';ctx.font='2.8px monospace';ctx.textAlign='center';ctx.save();ctx.translate(29.7,0);ctx.rotate(-Math.PI/2);ctx.fillText('KL01G7412',0,0.6);ctx.restore();
+  } else {
+    ctx.fillStyle='#ffcc00';ctx.fillRect(28.5,-3.5,2.5,7);ctx.fillStyle='#000';ctx.font='bold 2.8px monospace';ctx.textAlign='center';ctx.save();ctx.translate(29.7,0);ctx.rotate(-Math.PI/2);ctx.fillText('KL07C3287',0,0.6);ctx.restore();
+  }
+
+  // windshield - dark strip like ref top view
+  ctx.fillStyle='#0a0e14';ctx.fillRect(0,-11.5,2.5,23);
+  ctx.fillStyle='rgba(10,20,30,.9)';ctx.fillRect(0.5,-11,1.5,22);
+  // mirrors small black like ref top view
+  ctx.fillStyle='#0a0e14';ctx.beginPath();ctx.arc(1,-13,1.8,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(1,13,1.8,0,TAU);ctx.fill();
+
+  // soft top black like ref top view covering rear
+  ctx.fillStyle=topColor;
+  ctx.beginPath();ctx.moveTo(-1,-11);ctx.lineTo(-26,-11);ctx.lineTo(-28,-9);ctx.lineTo(-28,9);ctx.lineTo(-26,11);ctx.lineTo(-1,11);ctx.closePath();ctx.fill();
+  // soft top seams like ref
+  ctx.strokeStyle='rgba(255,255,255,.05)';ctx.lineWidth=0.5;
+  for(let i=-22;i<=-4;i+=5){ctx.beginPath();ctx.moveTo(i,-11);ctx.lineTo(i,11);ctx.stroke();}
+  // side windows - small dark like ref
+  ctx.fillStyle='rgba(80,90,100,.25)';ctx.fillRect(-20,-9,8,4);ctx.fillRect(-20,5,8,4);
+
+  // door handles
+  ctx.fillStyle='#0a0e14';ctx.fillRect(-6,-0.8,2.5,1.6);
+  // foot steps
+  ctx.fillStyle='#0a0e14';ctx.fillRect(-14,-12.5,9,2);ctx.fillRect(-14,10.5,9,2);
+
+  // seats black like ref
+  ctx.fillStyle='#0a0a0a';ctx.fillRect(-1,-9,7,7);ctx.fillRect(-1,2,7,7);
+
+  // side KSEB / POLICE markings like ref left/right side views but visible top-down as side text
+  if(isPolice){
+    // side stripes red/blue
+    ctx.fillStyle='#cc0000';ctx.fillRect(-16,-2.5,20,1);ctx.fillStyle='#0f3a9e';ctx.fillRect(-16,-1,20,1);
+    ctx.fillStyle='#cc0000';ctx.font='bold 5px sans-serif';ctx.textAlign='center';ctx.fillText('POLICE',-6,0);
+  } else {
+    ctx.fillStyle='#0f3a9e';ctx.font='bold 5.5px sans-serif';ctx.textAlign='center';ctx.fillText('KSEB',-6,0);
+  }
+
+  // spare tyre on rear - like ref rear view, mounted on back
+  ctx.save();ctx.translate(-28.5,0);
+  ctx.fillStyle='#0a0a0a';ctx.beginPath();ctx.arc(0,0,7.5,0,TAU);ctx.fill();
+  ctx.fillStyle='#8a8a8a';ctx.beginPath();ctx.arc(0,0,5,0,TAU);ctx.fill();
+  ctx.fillStyle='#5a5a5a';ctx.beginPath();ctx.arc(0,0,3.5,0,TAU);ctx.fill();
   ctx.restore();
-  if(jeep.repairing){const p=jeep.repairing,k=Math.sin(Game.t*18)*1.5;ctx.fillStyle='#1d3a5a';ctx.beginPath();ctx.arc(p.x-15,p.y+6+k,6.5,0,TAU);ctx.fill();ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(p.x-15,p.y-1.5+k,4.2,0,TAU);ctx.fill();ctx.fillStyle='#2a5a8a';ctx.fillRect(p.x-18,p.y+2+k,6,3);}
-  // beacon removed as per user request
+
+  // rear bumper
+  ctx.fillStyle=bumperColor;ctx.fillRect(-30,-11,3,22);
+  // rear lights orange/red like ref rear view
+  ctx.fillStyle='#ff4a0a';ctx.beginPath();ctx.arc(-29,-8,1.8,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(-29,8,1.8,0,TAU);ctx.fill();
+  ctx.fillStyle='#cc0000';ctx.beginPath();ctx.arc(-29,-5,1.2,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(-29,5,1.2,0,TAU);ctx.fill();
+  // rear number plate
+  if(isPolice){
+    ctx.fillStyle='#0a0a0a';ctx.fillRect(-31,-3,2.5,6);ctx.fillStyle='#fff';ctx.font='2.5px monospace';ctx.textAlign='center';ctx.save();ctx.translate(-29.8,0);ctx.rotate(-Math.PI/2);ctx.fillText('G7412',0,0.5);ctx.restore();
+  } else {
+    ctx.fillStyle='#ffcc00';ctx.fillRect(-31,-3,2.5,6);ctx.fillStyle='#000';ctx.font='bold 2.5px monospace';ctx.textAlign='center';ctx.save();ctx.translate(-29.8,0);ctx.rotate(-Math.PI/2);ctx.fillText('C3287',0,0.5);ctx.restore();
+  }
+
+  // brake
+  if(brakeOn){
+    ctx.fillStyle='#ff0000';ctx.beginPath();ctx.arc(-29,-8,2.2,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(-29,8,2.2,0,TAU);ctx.fill();
+  }
+
+  ctx.restore();
 }
+function drawMahindraJeep(){ drawMahindraJeepAt(jeep.x,jeep.y,jeep.heading+jeep.tilt*0.08, {steerAngle:jeep.steerAngle, tilt:jeep.tilt, brake: (keys.down||jeep.speed<-12||mobileBrake>0.2), headlights: jeep.headlights}); }
+function drawPoliceJeepAt(x,y,heading,isPlayer){
+  const steerA = isPlayer ? jeep.steerAngle : 0;
+  const brakeOn = isPlayer ? (keys.down||jeep.speed<-12||mobileBrake>0.2) : (aiPolice.speed<5);
+  drawMahindraJeepAt(x,y,heading, {isPolice:true, steerAngle:steerA, tilt: isPlayer?jeep.tilt*0.08:0, brake:brakeOn, headlights:true});
+  // siren lightbar centered like ref top view police - red/blue on front edge of soft top
+  ctx.save();ctx.translate(x,y);ctx.rotate(heading);
+  ctx.translate(0,0);
+  // lightbar base black
+  ctx.fillStyle='#0a0e14';ctx.fillRect(-2,-3,14,6);
+  // red and blue
+  ctx.save();ctx.translate(0,-5);
+  ctx.fillStyle='#ff0a0a';ctx.fillRect(-7,-2,6,4);
+  ctx.fillStyle='#0a4aff';ctx.fillRect(1,-2,6,4);
+  // glow
+  const flash = Math.sin(sirenAngle*5)>0;
+  ctx.fillStyle=flash?'rgba(255,20,20,.55)':'rgba(20,80,255,.55)';
+  ctx.beginPath();ctx.arc(flash?-4:4,0,8,0,2*3.14159);ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+
+
+
+
+
+
+
+function drawCommonManAt(x,y,heading,attackT){
+  ctx.save();ctx.translate(x,y);ctx.rotate(heading);
+  const speed = Math.abs(jeep.speed);
+  const walkCycle = Game.t* (speed>10 ? speed*0.08 : 0);
+  const bob = Math.sin(walkCycle)*2.5 * clamp(speed/80,0,1);
+  const legSwing = Math.sin(walkCycle)*0.6;
+  const armSwing = Math.sin(walkCycle+Math.PI)*0.5;
+  ctx.translate(0,bob);
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.32)';ctx.beginPath();ctx.ellipse(2,8-bob,12,5,0,0,TAU);ctx.fill();
+  // legs with swing
+  ctx.save();
+  // left leg
+  ctx.save();ctx.translate(-2.5,4);ctx.rotate(legSwing*0.5);
+  ctx.fillStyle='#2a3a5a';ctx.fillRect(-2,-1,4,10); // thigh
+  ctx.fillStyle='#1a2a3a';ctx.fillRect(-2,9,4,2); // shoe
+  ctx.restore();
+  // right leg
+  ctx.save();ctx.translate(2.5,4);ctx.rotate(-legSwing*0.5);
+  ctx.fillStyle='#2a3a5a';ctx.fillRect(-2,-1,4,10);
+  ctx.fillStyle='#1a2a3a';ctx.fillRect(-2,9,4,2);
+  ctx.restore();
+  ctx.restore();
+  // body - shirt with more detail
+  ctx.fillStyle='#4a8a3a';ctx.beginPath();ctx.roundRect(-6,-10,12,14,3);ctx.fill();
+  ctx.fillStyle='#3a6a2a';ctx.fillRect(-6,-10,12,2); // collar
+  ctx.fillStyle='#5a9a4a';ctx.fillRect(-2,-6,2,8); // button line
+  // arms
+  ctx.save();ctx.translate(-6,-6);ctx.rotate(armSwing*0.4);
+  ctx.fillStyle='#e8b78a';ctx.fillRect(-2,-1,4,9);
+  ctx.restore();
+  ctx.save();ctx.translate(6,-6);ctx.rotate(-armSwing*0.4 + (attackT>0 ? Math.sin((0.42-attackT)*20)*1.2 : 0));
+  ctx.fillStyle='#e8b78a';ctx.fillRect(-2,-1,4,9);
+  // hand + stick in right hand
+  ctx.save();ctx.translate(0,8);
+  ctx.rotate(attackT>0 ? -0.4 + Math.sin((0.42-attackT)*18)*0.9 : -0.2);
+  // stick - more realistic wood
+  ctx.fillStyle='#8b5a2b';ctx.fillRect(0,-2,32,4);
+  ctx.fillStyle='#6b3a1a';ctx.fillRect(0,-2,32,1);
+  ctx.fillStyle='#a67a3a';ctx.fillRect(28,-3,6,6); // tip
+  ctx.fillStyle='#5a3a1a';ctx.beginPath();ctx.arc(0,0,2.5,0,TAU);ctx.fill(); // grip
+  ctx.restore();
+  ctx.restore();
+  // head - more realistic
+  ctx.fillStyle='#e8b78a';ctx.beginPath();ctx.arc(0,-14,5.5,0,TAU);ctx.fill();
+  // face shadow
+  ctx.fillStyle='rgba(0,0,0,.12)';ctx.beginPath();ctx.arc(1,-13,4,0,TAU);ctx.fill();
+  // hair
+  ctx.fillStyle='#1a1a1a';ctx.beginPath();ctx.arc(0,-17,5.5,Math.PI,TAU);ctx.fill();
+  ctx.fillStyle='#1a1a1a';ctx.fillRect(-5.5,-18,11,3);
+  // eyes
+  ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-1.5,-14,0.7,0,TAU);ctx.fill();ctx.beginPath();ctx.arc(1.5,-14,0.7,0,TAU);ctx.fill();
+  // mustache for Kerala man
+  ctx.fillStyle='#111';ctx.fillRect(-2,-12,4,1);
+  ctx.restore();
+}
+
+function drawVillager(v){
+  ctx.save();ctx.translate(v.x,v.y);ctx.rotate(v.dir);
+  ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(1,5,8,4,0,0,TAU);ctx.fill();
+  ctx.fillStyle= v.type==='man' ? '#3a6a8a' : '#8a3a5a';
+  ctx.fillRect(-4,-5,8,8);
+  ctx.fillStyle='#e8b78a';ctx.beginPath();ctx.arc(0,-7,3.2,0,TAU);ctx.fill();
+  ctx.restore();
+}
+function drawKSEBGuy(x,y,anim){
+  const bob = Math.sin(anim*2)*1.2;
+  ctx.save();ctx.translate(x,y+bob);
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(0,8,9,4,0,0,TAU);ctx.fill();
+  // legs - blue pants
+  ctx.fillStyle='#1e3a5a';ctx.fillRect(-3,2,2.5,7);ctx.fillRect(1,2,2.5,7);
+  ctx.fillStyle='#0f1e2e';ctx.fillRect(-3,9,2.5,1.5);ctx.fillRect(1,9,2.5,1.5);
+  // body - khaki shirt
+  ctx.fillStyle='#d0c08a';ctx.fillRect(-4,-4,8,7);
+  ctx.fillStyle='#b0a06a';ctx.fillRect(-4,-4,8,1.5);
+  // arms - working
+  const swing = Math.sin(anim*6)*0.6;
+  ctx.save();ctx.translate(-4,-2);ctx.rotate(-0.4+swing);
+  ctx.fillStyle='#e8b78a';ctx.fillRect(-1,-1,2,6);
+  ctx.fillStyle='#2a2a2a';ctx.fillRect(-1,5,2,3); // wrench
+  ctx.restore();
+  ctx.save();ctx.translate(4,-2);ctx.rotate(0.3-swing);
+  ctx.fillStyle='#e8b78a';ctx.fillRect(-1,-1,2,6);
+  ctx.restore();
+  // head
+  ctx.fillStyle='#e8b78a';ctx.beginPath();ctx.arc(0,-7,3.8,0,TAU);ctx.fill();
+  // yellow hat - safety helmet like KSEB
+  ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(0,-10,4.5,Math.PI,TAU);ctx.fill();
+  ctx.fillStyle='#e6b800';ctx.fillRect(-4.5,-10,9,2);
+  ctx.fillStyle='#000';ctx.fillStyle='rgba(0,0,0,.15)';ctx.beginPath();ctx.arc(0,-10,4.5,Math.PI,TAU);ctx.fill();
+  // face
+  ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-1,-7,0.5,0,TAU);ctx.arc(1,-7,0.5,0,TAU);ctx.fill();
+  ctx.restore();
+}
+
 function drawParticles(){
+
   for(const m of marks){ctx.save();ctx.translate(m.x,m.y);ctx.rotate(m.a);ctx.fillStyle='rgba(10,10,12,'+clamp(m.life/6.5,0,0.45)+')';ctx.fillRect(-20,-13,9,3.5);ctx.fillRect(-20,9.5,9,3.5);ctx.restore();}
   for(const p of particles){ctx.globalAlpha=clamp(p.life*1.8,0,1);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fill();ctx.globalAlpha=1;}
   for(const s of shockParticles){ctx.globalAlpha=clamp(s.life*4,0,1);ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,TAU);ctx.fill();ctx.globalAlpha=1;}
@@ -826,7 +1371,10 @@ function drawMinimap(){
   const sx=mw/WORLD_W,sy=mh/WORLD_H;
   for(const p of poles){const x=mx+p.x*sx,y=my+p.y*sy;if(p.working){ctx.fillStyle='rgba(124,252,0,.85)';ctx.beginPath();ctx.arc(x,y,1.6,0,TAU);ctx.fill();}else{ctx.fillStyle='#ff3b30';ctx.beginPath();ctx.arc(x,y,3,0,TAU);ctx.fill();}}
   for(const t of thieves){ctx.fillStyle='rgba(255,120,120,.7)';ctx.beginPath();ctx.arc(mx+t.x*sx,my+t.y*sy,1.8,0,TAU);ctx.fill();}
-  const jx=mx+jeep.x*sx,jy=my+jeep.y*sy;ctx.save();ctx.translate(jx,jy);ctx.rotate(jeep.heading);ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.moveTo(6,0);ctx.lineTo(-4,-3);ctx.lineTo(-4,3);ctx.closePath();ctx.fill();ctx.restore();
+  for(const v of villagers){ctx.fillStyle='rgba(180,220,180,.5)';ctx.beginPath();ctx.arc(mx+v.x*sx,my+v.y*sy,1.2,0,TAU);ctx.fill();}
+  if(aiPolice.active){ctx.fillStyle='#ff3b30';ctx.beginPath();ctx.arc(mx+aiPolice.x*sx,my+aiPolice.y*sy,2.5,0,TAU);ctx.fill();}
+  if(aiKseb.active){ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(mx+aiKseb.x*sx,my+aiKseb.y*sy,2.5,0,TAU);ctx.fill();}
+  const jx=mx+jeep.x*sx,jy=my+jeep.y*sy;ctx.save();ctx.translate(jx,jy);ctx.rotate(jeep.heading);ctx.fillStyle=Settings.role==='police'?'#ff3b30':(Settings.role==='common'?'#7CFC00':'#ffd23f');ctx.beginPath();ctx.moveTo(6,0);ctx.lineTo(-4,-3);ctx.lineTo(-4,3);ctx.closePath();ctx.fill();ctx.restore();
 }
 function render(){
   const camX=Math.round(cam.x+(Math.random()-0.5)*Game.shake);
@@ -838,8 +1386,27 @@ function render(){
   ctx.save();ctx.translate(-camX,-camY);
   drawLightPools();drawWires();
   for(const p of poles)drawElectricPost(p);
+  for(const v of villagers)drawVillager(v);
   for(const t of thieves)drawThiefKerala(t);
-  drawMahindraJeep();
+  // AI jeeps
+  if(aiPolice.active) drawPoliceJeepAt(aiPolice.x,aiPolice.y,aiPolice.heading,false);
+  if(aiKseb.active) drawMahindraJeepAt(aiKseb.x,aiKseb.y,aiKseb.heading, {isPolice:false, steerAngle:0, tilt:0, brake:false, headlights:true});
+  // player based on role
+  if(Settings.role==='police'){ drawPoliceJeepAt(jeep.x,jeep.y,jeep.heading,true); }
+  else if(Settings.role==='common'){ drawCommonManAt(jeep.x,jeep.y,jeep.heading,commonAttackT); }
+  else { drawMahindraJeep(); }
+  // KSEB repair guys - bring back feature
+  if(jeep.repairing){
+    const p=jeep.repairing;
+    // guy at pole fixing
+    drawKSEBGuy(p.x-6, p.y+8, Game.t*3);
+    // small spark
+    if(Math.floor(Game.t*10)%2===0){ ctx.fillStyle='#ffeb3b'; ctx.beginPath(); ctx.arc(p.x+Math.random()*6-3, p.y+Math.random()*6-3, 2,0,TAU); ctx.fill(); }
+  }
+  if(aiKseb.active && aiKseb.targetPole && aiKseb.repairT>0){
+    const p=aiKseb.targetPole;
+    drawKSEBGuy(p.x-6, p.y+8, Game.t*3+1);
+  }
   drawParticles();
   ctx.restore();
   drawLightMask(camX,camY);
@@ -847,7 +1414,7 @@ function render(){
   drawHUD();
 }
 
-const Settings={steering:1.0,volume:0.85,controlType:'wheel',soundOn:true};
+const Settings={steering:1.0,volume:0.85,controlType:'wheel',soundOn:true,role:'kseb'};
 function loadSettings(){
   try{
     const s=JSON.parse(localStorage.getItem('triveni_settings_v2')||'{}');
@@ -855,6 +1422,7 @@ function loadSettings(){
     if(s.volume!==undefined)Settings.volume=clamp(parseFloat(s.volume),0,1);
     if(s.controlType)Settings.controlType=s.controlType;
     if(s.soundOn!==undefined)Settings.soundOn=!!s.soundOn;
+    if(s.role)Settings.role=s.role;
   }catch(e){}
 }
 function saveSettings(){try{localStorage.setItem('triveni_settings_v2',JSON.stringify(Settings));}catch(e){}}
@@ -873,6 +1441,11 @@ function applySettings(){
   if(steerWheel)steerWheel.classList.toggle('hidden', Settings.controlType!=='wheel');
   if(steerBtns)steerBtns.classList.toggle('hidden', Settings.controlType!=='buttons');
   document.querySelectorAll('[data-sound]').forEach(b=>b.classList.toggle('on', (b.dataset.sound==='on')===Settings.soundOn));
+  document.querySelectorAll('[data-role]').forEach(b=>b.classList.toggle('on', b.dataset.role===Settings.role));
+  // toggle AI active based on role
+  aiPolice.active = Settings.role!=='police';
+  aiKseb.active = Settings.role!=='kseb';
+  if(Settings.role==='common'){ aiPolice.active=true; aiKseb.active=true; }
 }
 
 const keys={up:false,down:false,left:false,right:false,space:false};
@@ -911,6 +1484,7 @@ function bindUI(){
   document.getElementById('resetSteering').addEventListener('click',()=>{Settings.steering=1.0;steeringSlider.value=1.0;applySettings();saveSettings();});
   document.querySelectorAll('[data-ctrl]').forEach(b=>{b.addEventListener('click',()=>{Settings.controlType=b.dataset.ctrl;applySettings();saveSettings();});});
   document.querySelectorAll('[data-sound]').forEach(b=>{b.addEventListener('click',()=>{Settings.soundOn=b.dataset.sound==='on';applySettings();saveSettings();});});
+  document.querySelectorAll('[data-role]').forEach(b=>{b.addEventListener('click',()=>{Settings.role=b.dataset.role;applySettings();saveSettings(); initAIJeeps();});});
   initMobileControls();
   initRotateOverlay();
 }
@@ -978,5 +1552,5 @@ function boot(){resize();bindUI();generateWorld(20260915);renderBackground();res
 boot();
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b8cf343d16efe6',t:'MTc4OTQ4NzY2MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b996205fd577d3',t:'MTc4OTQ5NTgwOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
