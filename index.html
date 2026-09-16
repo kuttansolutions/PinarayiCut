@@ -127,20 +127,6 @@ button:active{ transform:translateY(1px) scale(.98); }
   #settingsPanel{ width:92vw; left:4vw; right:4vw; top:auto; bottom:10px; max-height:70vh; overflow:auto; }
 }
 
-#ksebCall{
-  position:absolute; left:50%; top:56px; transform:translate(-50%,-180%);
-  background:rgba(20,90,200,.92); border:1px solid #4fc3f7; color:#fff;
-  padding:8px 16px; border-radius:8px; font-size:12px; letter-spacing:.8px;
-  z-index:26; transition:transform .25s ease, opacity .25s ease; opacity:0;
-  white-space:nowrap; box-shadow:0 8px 30px rgba(0,0,0,.6); max-width:92vw;
-  overflow:hidden; text-overflow:ellipsis;
-}
-#ksebCall.show{ transform:translate(-50%,0); opacity:1; animation: ringShake .18s infinite; }
-@keyframes ringShake{
-  0%{ transform:translate(-50%,0) rotate(-1deg); }
-  50%{ transform:translate(-50%,0) rotate(1deg); }
-  100%{ transform:translate(-50%,0) rotate(-1deg); }
-}
 #pedalZone{ flex-direction:row; }
 #pedalZone #btnBrake{ order:1; }
 #pedalZone #btnAccel{ order:2; }
@@ -151,11 +137,10 @@ button:active{ transform:translateY(1px) scale(.98); }
 <body>
 <canvas id="game"></canvas>
 <div id="banner"></div>
-<div id="ksebCall"></div>
 <button id="settingsBtn">⚙️</button>
 <div id="screen" class="panel">
   <div class="kerala-badge">അണ്ടിമുക്ക് നഗർ</div>
-  <h1>POWER(PINARAYI) CUT</h1>
+  <h1>POWER CUT SIMULATOR</h1>
   <h2>Developed By: Kuttan Solutions</h2>
   <div id="screenBtns">
     <button id="btnStart">START</button>
@@ -442,7 +427,7 @@ function drawAKGOnMap(g){
   g.fillStyle='#fffdf4';g.fillRect(bx,by,bw,15);
   g.strokeStyle='#b93a2c';g.lineWidth=2;g.strokeRect(bx,by,bw,15);
   g.fillStyle='#b93a2c';g.font='bold 11px monospace';g.textAlign='center';g.textBaseline='middle';
-  g.fillText('CKG CENTRE',x+w/2,by+8);
+  g.fillText('BKG CENTRE',x+w/2,by+8);
   // flag pole with red flag, front corner
   g.strokeStyle='#5a5a5e';g.lineWidth=2;g.beginPath();g.moveTo(x-14,y-over+2);g.lineTo(x-14,y-over-26);g.stroke();
   g.fillStyle='#d8232a';g.beginPath();g.moveTo(x-14,y-over-26);g.lineTo(x+8,y-over-21);g.lineTo(x-14,y-over-15);g.closePath();g.fill();
@@ -462,8 +447,7 @@ const Sfx={ready:false,ac:null,master:null,eng:null,noiseBuf:null,
   ratchet(){for(let i=0;i<4;i++)setTimeout(()=>{this.noise(0.035,1800,0.22,3);this.tone(300,0.03,'square',0.05);},i*130);},
   chime(){[660,880,1180].forEach((f,i)=>setTimeout(()=>this.tone(f,0.18,'triangle',0.12),i*90));},
   thud(){this.noise(0.14,180,0.5,0.8);this.tone(90,0.16,'sine',0.22,50);},
-  bark(){this.tone(560,0.07,'square',0.10,320);setTimeout(()=>this.tone(500,0.06,'square',0.09,300),90);},
-  notify(){this.tone(523,0.22,'sine',0.09);setTimeout(()=>this.tone(784,0.30,'sine',0.07),150);}
+  bark(){this.tone(560,0.07,'square',0.10,320);setTimeout(()=>this.tone(500,0.06,'square',0.09,300),90);}
 };
 
 const jeep={x:0,y:0,heading:0,speed:0,steerAngle:0,steerVis:0,headlights:true,repairing:null,repairT:0,bumpCd:0,tilt:0};
@@ -880,14 +864,16 @@ function updateJeep(dt){
 let lastSkid=0;
 const marks=[],particles=[],shockLines=[],shockParticles=[];
 
-let caughtAudio=null, whoAreYouAudio=null, speechAudio=null, speechLevel=0, lastWhoAreYou=0;
+let caughtAudio=null, whoAreYouAudio=null, speechAudio=null, speechLevel=0, goneAudio=null, lastWhoAreYou=0;
 function initAudio(){
   try{
     caughtAudio=new Audio('assets/caught.mp3');caughtAudio.volume=Settings.volume;
     whoAreYouAudio=new Audio('assets/whoareyou.mp3');whoAreYouAudio.volume=Settings.volume;
     speechAudio=new Audio('assets/speech.mp3');speechAudio.loop=true;speechAudio.volume=0;
+    goneAudio=new Audio('assets/gone.mp3');goneAudio.volume=Settings.volume;
   }catch(e){}
 }
+function playGoneSound(){if(!Settings.soundOn)return;if(goneAudio){try{goneAudio.currentTime=0;goneAudio.play().catch(()=>{});}catch(e){}}}
 function updateSpeech(){
   // Inside/near the A.K.G. Centre you can hear the speech going on inside (assets/speech.mp3).
   // Volume scales with proximity; the 2s clip loops while you stay in range.
@@ -1103,30 +1089,18 @@ function finishSteal(t){
   else{t.pole=null;t.state=TH.FLEE;t.timer=6;t.progress=0;}
   p.working=false;p.darkSince=Game.t;Game.thefts++;Game.lastTheftTime=Game.t;
   addShockBurst(p.x,p.y,18);addParticles(p.x,p.y,14,'#ffeb3b');
-  alertPush('FUSE STOLEN - KAMMI','shock');
-  triggerKSEBCall();
-  if(Settings.soundOn)Sfx.notify();
+  alertPush('FUSE GONE','shock');
+  playGoneSound();
   Game.flash=1;Game.shake=9;
 }
 
 const Game={mode:'title',paused:false,t:0,shift:0,caught:0,thefts:0,uptime:0,litIntegral:0,shake:0,flash:0,darkCount:0,blackoutTimer:0,deadThieves:[],graceT:0,activeThefts:0,lastTheftTime:-999};
-let ksebCallTimer=0, ksebCallTimeout=null;
 let sirenAngle=0;
 let commonAttackT=0;
 let villagers=[];
 let dogs=[];
 const aiPolice={x:0,y:0,heading:0,speed:0,active:false,tx:0,ty:0,timer:0,targetId:null};
 const aiKseb={x:0,y:0,heading:0,speed:0,active:false,tx:0,ty:0,timer:0,targetPole:null,repairT:0};
-
-function triggerKSEBCall(){
-  // only show customer call when player is KSEB, not police or common
-  if(Settings.role!=='kseb') return;
-  ksebCallTimer=1.5;
-  const el=document.getElementById('ksebCall');
-  if(el){el.textContent='📞 KSEB CALL: Customer — RINGING...'; el.className='show'; }
-  clearTimeout(ksebCallTimeout);
-  ksebCallTimeout=setTimeout(()=>{const el2=document.getElementById('ksebCall'); if(el2) el2.className=''; ksebCallTimer=0;},1500);
-}
 
 const cam={x:0,y:0};
 let alertTimer=null,lastAlertAt=-99;
@@ -1605,7 +1579,7 @@ function render(){
   drawHUD();
 }
 
-const Settings={steering:1.0,volume:0.85,brightness:1.0,controlType:'wheel',soundOn:true,role:'kseb'};
+const Settings={steering:1.0,volume:0.85,brightness:1.44,controlType:'wheel',soundOn:true,role:'kseb'};
 function loadSettings(){
   try{
     const s=JSON.parse(localStorage.getItem('triveni_settings_v2')||'{}');
@@ -1625,6 +1599,7 @@ function applySettings(){
   CFG.MAX_STEER=clamp(DEFAULTS.MAX_STEER*(0.55+0.65*sens),0.35,1.25);
   if(caughtAudio)caughtAudio.volume=Settings.volume;
   if(whoAreYouAudio)whoAreYouAudio.volume=Settings.volume;
+  if(goneAudio)goneAudio.volume=Settings.volume;
   const elSens=document.getElementById('steeringVal');if(elSens)elSens.textContent=sens.toFixed(1)+'x';
   const elBright=document.getElementById('brightnessVal');if(elBright)elBright.textContent=Math.round(Settings.brightness*100)+'%';
   const elTurn=document.getElementById('turnVal');if(elTurn)elTurn.textContent=CFG.LOW_SPEED_TURN.toFixed(1)+' / '+(CFG.MAX_STEER*57.3).toFixed(0)+'°';
@@ -1749,5 +1724,5 @@ function boot(){resize();bindUI();generateWorld(20260915);renderBackground();res
 boot();
 })();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3c198790b35ff60',t:'MTc4OTU3OTc5MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
